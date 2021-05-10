@@ -18,9 +18,9 @@ namespace ValidateIssuesGithub
     public static class ValidateIssue
     {
         #region Constants
-        private const int BAD_JSON_INT_VALUE = -1;
-        private const string BAD_JSON_STIRNG_VALUE = "Invalid JSON parsing";
-        private const string GITHUB_APP_PRIVATE_KEY = @"
+        private const  int    BAD_JSON_INT_VALUE             = -1;
+        private const  string BAD_JSON_STIRNG_VALUE          = "Invalid JSON parsing";
+        private const  string GITHUB_APP_PRIVATE_KEY         = @"
 MIIEowIBAAKCAQEAzJI7p1Wz/aqSuN6tvAtI38nnql9sj1Op7zGzvUGZYikNhTsV
 HxnuIAZHy/V6zPP8+nlM40n4tehq+VL+h0d09ZstSjcobdcg7ghEOg/JmIGFi3nC
 00PSKeX1ykhmHUp4IzudHROyqGcnpjNS14fF+B6iLxY5gHI/fuADAHKWqsDaRYjg
@@ -47,8 +47,10 @@ r12BiQKBgEqnGNw/dX+tEpza3ke6Rg9EeC6YKXFIZNh6QPaUXXn5iT/JDjfdWP8E
 wZPXrnV/oB0NniaWEWX4Tn8pgKuDUfidkeM3Qsz0XQlGsRbWCohCVDN+c0ZzfS2d
 lIVxLRDOFE5ocQ+VmUy8FmtrpzR935YBla2Z0f5iPmwne/B9T4wl
 ";
-
-        private static bool DEBUG_LOGIN = false;
+        private const  int    GITHUB_APP_ID                  = 114533;
+        private const  int    GITHUB_APP_JWT_TOKEN_LIFE_TIME = 600;// 10 minutes is the maximum time allowed
+        private static bool   DEBUG_LOGS                     = false;
+        private static bool   BAD_DATA_COME                  = false;
         #endregion
 
         [FunctionName("ValidateIssue")]
@@ -58,36 +60,13 @@ lIVxLRDOFE5ocQ+VmUy8FmtrpzR935YBla2Z0f5iPmwne/B9T4wl
         {
             log.LogInformation( $"Webhook was triggered!" );
 
-            #region Get data from JSON
-            var requestedValues = GetDataFromJson(req, log);
-
-            string requestBody = await new StreamReader( req.Body ).ReadToEndAsync();
-            dynamic data = JsonConvert.DeserializeObject( requestBody );
-            string action = data?.action;
-
-            if ( ! action.Equals("requested") )
+            
+            var requestedValues = GetDataFromJson( req, log ).Result;
+            
+            if ( BAD_DATA_COME )
             {
-                log.LogInformation(action);
-                return new OkObjectResult("Tas is compited");
+                return new BadRequestObjectResult( "Task complited with error" );
             }
-            int prNumber = data?.check_suite?.pull_requests?[0].number ?? BAD_JSON_INT_VALUE;
-            if ( prNumber == BAD_JSON_INT_VALUE )
-            {
-                log.LogInformation("Not a pull request");
-                return new OkObjectResult("It is not a pull request");
-            }
-            int repositoryTargetId = data?.check_suite?.pull_requests?[0].head?.repo?.id;
-            string headSHA = data?.check_suite?.head_sha;
-            int repoId = data?.repository?.id;
-            string repoName = data?.repository?.name;
-            string owner = data?.repository?.owner?.login;
-            log.LogInformation(    $"\nAction: {action}" +
-                                   $"\nPull Request number: {prNumber}" +
-                                   $"\nRepository Id: {repoId}" +
-                                   $"\nHea SHA: {headSHA}" +
-                                   $"\nRepository Id: {repoId}" +
-                                   $"\nRepository name: {repoName}");
-            #endregion
 
             #region GitHub App auth and new check created
 
@@ -95,8 +74,8 @@ lIVxLRDOFE5ocQ+VmUy8FmtrpzR935YBla2Z0f5iPmwne/B9T4wl
             new GitHubJwt.StringPrivateKeySource( GITHUB_APP_PRIVATE_KEY ),
             new GitHubJwt.GitHubJwtFactoryOptions
             {
-                AppIntegrationId = 114533, // The GitHub App Id
-                ExpirationSeconds = 600 // 10 minutes is the maximum time allowed
+                AppIntegrationId = GITHUB_APP_ID,
+                ExpirationSeconds = GITHUB_APP_JWT_TOKEN_LIFE_TIME
             }
             );
  
@@ -110,8 +89,7 @@ lIVxLRDOFE5ocQ+VmUy8FmtrpzR935YBla2Z0f5iPmwne/B9T4wl
                     )
             };
 
-            long installationId = data?.installation?.id;
-            var responce = await appClient.GitHubApps.CreateInstallationToken( installationId );
+            var responce = await appClient.GitHubApps.CreateInstallationToken( requestedValues.InstallationId );
 
             var checkClient = new GitHubClient( new ProductHeaderValue("test") )
             {
@@ -119,34 +97,74 @@ lIVxLRDOFE5ocQ+VmUy8FmtrpzR935YBla2Z0f5iPmwne/B9T4wl
             };
 
             var chRun = await checkClient.Check.Run.Create(
-                repoId, 
+                requestedValues.RepoId, 
                 new NewCheckRun(
-                    "Losur-check", 
-                    headSHA
+                    "Losur-check",
+                    requestedValues.HeadSHA
                     ) 
                 );
-            
+
             #endregion
 
-            #region GraphQl request
+            var valuesGraphQL = IsIssueAttached( responce.Token, requestedValues, log ).Result;
 
-            var client = new GraphQLHttpClient( 
+            #region Create Update run for Check
+            var checkUpdate = new CheckRunUpdate();
+
+           
+            if (BAD_DATA_COME)
+            {
+                checkUpdate.Status = CheckStatus.Completed;
+                checkUpdate.Conclusion = CheckConclusion.Failure;
+                log.LogError("Complited with error");
+            }
+            else
+            {
+                if (valuesGraphQL.LastTag.Equals("ConnectedEvent"))
+                {
+                    checkUpdate.Status = CheckStatus.Completed;
+                    checkUpdate.Conclusion = CheckConclusion.Success;
+                        
+                }
+                else
+                {
+                    checkUpdate.Status = CheckStatus.Completed;
+                    checkUpdate.Conclusion = CheckConclusion.Failure;
+                }
+                
+                log.LogInformation("Complited");
+            }
+
+            await checkClient.Check.Run.Update(
+                requestedValues.RepoId, 
+                chRun.Id, 
+                checkUpdate 
+            );
+            #endregion
+
+            
+            return new OkObjectResult( $"Task return {!BAD_DATA_COME}" );
+        }
+
+        public static async Task<ValuesOfGraphQLResponce> IsIssueAttached(string token, RequestValues rv, ILogger log)
+        {
+            var client = new GraphQLHttpClient(
                 "https://api.github.com/graphql",
-                new NewtonsoftJsonSerializer() 
+                new NewtonsoftJsonSerializer()
                 );
 
-            client.HttpClient.DefaultRequestHeaders.Add( 
+            client.HttpClient.DefaultRequestHeaders.Add(
                 "Authorization",
-                $"bearer { responce.Token }" 
+                $"bearer { token }"
                 );
 
             var issueRequest = new GraphQLRequest
             {
                 Query = @"
                query {
-                  repositoryOwner(login:""" + owner + @""") {
-                    repository(name: """ + repoName + @""") {
-                      pullRequest(number: " + prNumber + @") {
+                  repositoryOwner(login:""" + rv.Owner + @""") {
+                    repository(name: """ + rv.RepoName + @""") {
+                      pullRequest(number: " + rv.PrNumber + @") {
                         timelineItems(itemTypes: [CONNECTED_EVENT, DISCONNECTED_EVENT], first: 100) {
                        filteredCount
                         nodes {
@@ -175,58 +193,30 @@ lIVxLRDOFE5ocQ+VmUy8FmtrpzR935YBla2Z0f5iPmwne/B9T4wl
               }
                 "
             };
-            var graphQLResponse = await client.SendQueryAsync<IssueResonse>( issueRequest );
-            #endregion
-
-            #region GraphQL responce data
-            int size = graphQLResponse.Data.RepositoryOwner.Repository.PullRequest.TimelineItems.FilteredCount;
-            IssueResonse.RepositoryOwnerType.RepositoryType.PullRequestType.TimelineItemsType.NodesType[] arr = graphQLResponse.Data.RepositoryOwner.Repository.PullRequest.TimelineItems.Nodes.ToArray();
-            string lastTag = arr[size - 1].__Typename;
-            #endregion
-
-            #region Create Update run for Check
-            var checkUpdate = new CheckRunUpdate();
-
-            if ( size == 0 )
+            var graphQLResponse = await client.SendQueryAsync<IssueResonse>(issueRequest);
+            var valuesGraphQL = new ValuesOfGraphQLResponce()
             {
-                checkUpdate.Status = CheckStatus.Completed;
-                checkUpdate.Conclusion = CheckConclusion.Failure;
-                
-            }
-            else {
-                if ( lastTag.Equals( "ConnectedEvent" ) )
-                {
-                    checkUpdate.Status = CheckStatus.Completed;
-                    checkUpdate.Conclusion = CheckConclusion.Success;
-                }
-                else
-                {
-                    checkUpdate.Status = CheckStatus.Completed;
-                    checkUpdate.Conclusion = CheckConclusion.Failure;
-                    //await githubClient.Issue.Comment.Create(owner, repoName, prNumber, $"Issue is NOT implement");
-                    //responseMessage = "Issue is NOT implement";
-                }
-            }
-            
-
-            await checkClient.Check.Run.Update(
-                repoId, 
-                chRun.Id, 
-                checkUpdate 
-            );
-            #endregion
-            log.LogInformation("Complited");
-            return new OkObjectResult( "Task compited sucñessfull" );
-        }
-
-        public static ValuesOfGraphQLResponce IsIssueAttached(string token)
-        {
-
-            ValuesOfGraphQLResponce values = new ValuesOfGraphQLResponce()
-            {
-                
+                Size = graphQLResponse.Data.RepositoryOwner.Repository.PullRequest.TimelineItems.FilteredCount
             };
-            return values;
+
+            if (valuesGraphQL.Size == 0)
+            {
+                log.LogError($"GraphQL error. Size equals 0");
+            }
+
+            IssueResonse.RepositoryOwnerType.RepositoryType.PullRequestType.TimelineItemsType.NodesType[] arr = graphQLResponse.Data.RepositoryOwner.Repository.PullRequest.TimelineItems.Nodes.ToArray();
+            valuesGraphQL.LastTag = arr[valuesGraphQL.Size - 1].__Typename;
+
+            #region Debug logs
+            if (DEBUG_LOGS)
+            {
+                log.LogInformation($"\nValues from GraphQL" +
+                    $"\nSize: {valuesGraphQL.Size}" +
+                    $"\nLast tag:{valuesGraphQL.LastTag}");
+            }
+            #endregion
+
+            return valuesGraphQL;
         }
 
         public static async Task<RequestValues> GetDataFromJson(HttpRequest req, ILogger log)
@@ -235,38 +225,39 @@ lIVxLRDOFE5ocQ+VmUy8FmtrpzR935YBla2Z0f5iPmwne/B9T4wl
             dynamic data = JsonConvert.DeserializeObject(requestBody);
             RequestValues rv = new RequestValues();
 
-            rv.Action           = data?.action                                        ?? BAD_JSON_STIRNG_VALUE;
+            rv.Action             = data?.action                                        ?? BAD_JSON_STIRNG_VALUE;
             rv.PrNumber           = data?.check_suite?.pull_requests?[0].number         ?? BAD_JSON_INT_VALUE;
             rv.RepositoryTargetId = data?.check_suite?.pull_requests?[0].head?.repo?.id ?? BAD_JSON_INT_VALUE;
             rv.HeadSHA            = data?.check_suite?.head_sha                         ?? BAD_JSON_STIRNG_VALUE;
             rv.RepoId             = data?.repository?.id                                ?? BAD_JSON_INT_VALUE;
             rv.RepoName           = data?.repository?.name                              ?? BAD_JSON_STIRNG_VALUE;
             rv.Owner              = data?.repository?.owner?.login                      ?? BAD_JSON_STIRNG_VALUE;
-
+            rv.InstallationId     = data?.installation?.id                              ?? BAD_JSON_INT_VALUE;
 
             if ( ! rv.Action.Equals("requested") )
             {
-                log.LogInformation($"Not a requested action comes: {rv.Action}");
-                rv.ContinueFlag = false;
+                log.LogInformation( $"Not a requested action comes: { rv.Action }" );
+                BAD_DATA_COME = true;
                 return rv;
             }
 
-            if (rv.Action.Equals(BAD_JSON_STIRNG_VALUE)     ||
-                rv.PrNumber == BAD_JSON_INT_VALUE           ||
-                rv.RepositoryTargetId == BAD_JSON_INT_VALUE ||
-                rv.HeadSHA.Equals(BAD_JSON_STIRNG_VALUE)    ||
-                rv.RepoId == BAD_JSON_INT_VALUE             ||
-                rv.RepoName.Equals(BAD_JSON_STIRNG_VALUE)   ||
-                rv.Owner.Equals(BAD_JSON_STIRNG_VALUE)
+            if (rv.Action        .Equals(BAD_JSON_STIRNG_VALUE) ||
+                rv.PrNumber           == BAD_JSON_INT_VALUE     ||
+                rv.RepositoryTargetId == BAD_JSON_INT_VALUE     ||
+                rv.HeadSHA       .Equals(BAD_JSON_STIRNG_VALUE) ||
+                rv.RepoId             == BAD_JSON_INT_VALUE     ||
+                rv.RepoName      .Equals(BAD_JSON_STIRNG_VALUE) ||
+                rv.Owner         .Equals(BAD_JSON_STIRNG_VALUE) ||
+                rv.InstallationId     == BAD_JSON_INT_VALUE
                 )
             {
                 log.LogError("One of values comes with error");
-                rv.ContinueFlag = false;
+                BAD_DATA_COME = true;
                 return rv;
             }
 
             #region Debug log
-            if (DEBUG_LOGIN)
+            if (DEBUG_LOGS)
             {
                 log.LogInformation($"\nAction: {rv.Action}" +
                                $"\nPull Request number: {rv.PrNumber}" +
@@ -279,7 +270,8 @@ lIVxLRDOFE5ocQ+VmUy8FmtrpzR935YBla2Z0f5iPmwne/B9T4wl
 
             return rv;
         }
-
+        
+        #region Data classes representations
         public class RequestValues
         {
             public string Action             { get; set; }
@@ -289,7 +281,7 @@ lIVxLRDOFE5ocQ+VmUy8FmtrpzR935YBla2Z0f5iPmwne/B9T4wl
             public int    RepoId             { get; set; }
             public string RepoName           { get; set; }
             public string Owner              { get; set; }
-            public bool   ContinueFlag       { get; set; } = true;
+            public long   InstallationId     { get; set; }
 
     }
 
@@ -299,7 +291,7 @@ lIVxLRDOFE5ocQ+VmUy8FmtrpzR935YBla2Z0f5iPmwne/B9T4wl
             public int Size { get; set; }
         }
 
-        #region GraphQL responce object class
+        
         public class IssueResonse
         {
             public RepositoryOwnerType RepositoryOwner { get; set; }
