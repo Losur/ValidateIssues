@@ -19,6 +19,7 @@ namespace ValidateIssuesGithub
     {
         #region Constants
         private const int BAD_JSON_INT_VALUE = -1;
+        private const string BAD_JSON_STIRNG_VALUE = "Invalid JSON parsing";
         private const string GITHUB_APP_PRIVATE_KEY = @"
 MIIEowIBAAKCAQEAzJI7p1Wz/aqSuN6tvAtI38nnql9sj1Op7zGzvUGZYikNhTsV
 HxnuIAZHy/V6zPP8+nlM40n4tehq+VL+h0d09ZstSjcobdcg7ghEOg/JmIGFi3nC
@@ -46,6 +47,8 @@ r12BiQKBgEqnGNw/dX+tEpza3ke6Rg9EeC6YKXFIZNh6QPaUXXn5iT/JDjfdWP8E
 wZPXrnV/oB0NniaWEWX4Tn8pgKuDUfidkeM3Qsz0XQlGsRbWCohCVDN+c0ZzfS2d
 lIVxLRDOFE5ocQ+VmUy8FmtrpzR935YBla2Z0f5iPmwne/B9T4wl
 ";
+
+        private static bool DEBUG_LOGIN = false;
         #endregion
 
         [FunctionName("ValidateIssue")]
@@ -56,6 +59,8 @@ lIVxLRDOFE5ocQ+VmUy8FmtrpzR935YBla2Z0f5iPmwne/B9T4wl
             log.LogInformation( $"Webhook was triggered!" );
 
             #region Get data from JSON
+            var requestedValues = GetDataFromJson(req, log);
+
             string requestBody = await new StreamReader( req.Body ).ReadToEndAsync();
             dynamic data = JsonConvert.DeserializeObject( requestBody );
             string action = data?.action;
@@ -76,7 +81,12 @@ lIVxLRDOFE5ocQ+VmUy8FmtrpzR935YBla2Z0f5iPmwne/B9T4wl
             int repoId = data?.repository?.id;
             string repoName = data?.repository?.name;
             string owner = data?.repository?.owner?.login;
-            log.LogInformation( $"\nOwner: { owner }\nRepo: { repoName }\nPr: { prNumber }\nCommit sha: { headSHA }\nRepos id: { repositoryTargetId }" );
+            log.LogInformation(    $"\nAction: {action}" +
+                                   $"\nPull Request number: {prNumber}" +
+                                   $"\nRepository Id: {repoId}" +
+                                   $"\nHea SHA: {headSHA}" +
+                                   $"\nRepository Id: {repoId}" +
+                                   $"\nRepository name: {repoName}");
             #endregion
 
             #region GitHub App auth and new check created
@@ -219,33 +229,58 @@ lIVxLRDOFE5ocQ+VmUy8FmtrpzR935YBla2Z0f5iPmwne/B9T4wl
             return values;
         }
 
-        public static async Task<RequestValues> GetDataFromJson(HttpRequest req)
+        public static async Task<RequestValues> GetDataFromJson(HttpRequest req, ILogger log)
         {
             string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
             dynamic data = JsonConvert.DeserializeObject(requestBody);
+            RequestValues rv = new RequestValues();
 
-            string action = data?.action;
-            int prNumber = data?.check_suite?.pull_requests?[0].number ?? BAD_JSON_INT_VALUE;
-            int repositoryTargetId = data?.check_suite?.pull_requests?[0].head?.repo?.id ?? BAD_JSON_INT_VALUE;
-            string headSHA = data?.check_suite?.head_sha;
-            int repoId = data?.repository?.id;
-            string repoName = data?.repository?.name;
-            string owner = data?.repository?.owner?.login;
+            rv.Action           = data?.action                                        ?? BAD_JSON_STIRNG_VALUE;
+            rv.PrNumber           = data?.check_suite?.pull_requests?[0].number         ?? BAD_JSON_INT_VALUE;
+            rv.RepositoryTargetId = data?.check_suite?.pull_requests?[0].head?.repo?.id ?? BAD_JSON_INT_VALUE;
+            rv.HeadSHA            = data?.check_suite?.head_sha                         ?? BAD_JSON_STIRNG_VALUE;
+            rv.RepoId             = data?.repository?.id                                ?? BAD_JSON_INT_VALUE;
+            rv.RepoName           = data?.repository?.name                              ?? BAD_JSON_STIRNG_VALUE;
+            rv.Owner              = data?.repository?.owner?.login                      ?? BAD_JSON_STIRNG_VALUE;
 
-            if ( !action.Equals("requested") || 
-                prNumber == BAD_JSON_INT_VALUE ||
-                repositoryTargetId == BAD_JSON_INT_VALUE
 
-                )
-
-            return new RequestValues()
+            if ( ! rv.Action.Equals("requested") )
             {
-                
+                log.LogInformation($"Not a requested action comes: {rv.Action}");
+                rv.ContinueFlag = false;
+                return rv;
+            }
 
-            };
+            if (rv.Action.Equals(BAD_JSON_STIRNG_VALUE)     ||
+                rv.PrNumber == BAD_JSON_INT_VALUE           ||
+                rv.RepositoryTargetId == BAD_JSON_INT_VALUE ||
+                rv.HeadSHA.Equals(BAD_JSON_STIRNG_VALUE)    ||
+                rv.RepoId == BAD_JSON_INT_VALUE             ||
+                rv.RepoName.Equals(BAD_JSON_STIRNG_VALUE)   ||
+                rv.Owner.Equals(BAD_JSON_STIRNG_VALUE)
+                )
+            {
+                log.LogError("One of values comes with error");
+                rv.ContinueFlag = false;
+                return rv;
+            }
+
+            #region Debug log
+            if (DEBUG_LOGIN)
+            {
+                log.LogInformation($"\nAction: {rv.Action}" +
+                               $"\nPull Request number: {rv.PrNumber}" +
+                               $"\nRepository Id: {rv.RepoId}" +
+                               $"\nHea SHA: {rv.HeadSHA}" +
+                               $"\nRepository Id: {rv.RepoId}" +
+                               $"\nRepository name: {rv.RepoName}");
+            }
+            #endregion
+
+            return rv;
         }
 
-        private class RequestValues
+        public class RequestValues
         {
             public string Action             { get; set; }
             public int    PrNumber           { get; set; }
@@ -254,12 +289,11 @@ lIVxLRDOFE5ocQ+VmUy8FmtrpzR935YBla2Z0f5iPmwne/B9T4wl
             public int    RepoId             { get; set; }
             public string RepoName           { get; set; }
             public string Owner              { get; set; }
-
-
+            public bool   ContinueFlag       { get; set; } = true;
 
     }
 
-        private class ValuesOfGraphQLResponce
+        public class ValuesOfGraphQLResponce
         {
             public string LastTag { get; set; }
             public int Size { get; set; }
