@@ -12,6 +12,8 @@ using GraphQL.Client.Http;
 using GraphQL.Client.Serializer.Newtonsoft;
 using GraphQL;
 using System.Collections.Generic;
+using System.Resources;
+using System.Reflection;
 
 namespace ValidateIssuesGithub
 {
@@ -20,37 +22,36 @@ namespace ValidateIssuesGithub
         #region Constants
         private const  int    BAD_JSON_INT_VALUE             = -1;
         private const  string BAD_JSON_STIRNG_VALUE          = "Invalid JSON parsing";
-        private const  string GITHUB_APP_PRIVATE_KEY         = @"
-MIIEowIBAAKCAQEAzJI7p1Wz/aqSuN6tvAtI38nnql9sj1Op7zGzvUGZYikNhTsV
-HxnuIAZHy/V6zPP8+nlM40n4tehq+VL+h0d09ZstSjcobdcg7ghEOg/JmIGFi3nC
-00PSKeX1ykhmHUp4IzudHROyqGcnpjNS14fF+B6iLxY5gHI/fuADAHKWqsDaRYjg
-rZC2esDMa5DxUs4s/NjiNWyCmuRdkRhjiClgRDKLJjRl3hE2cbq3XYmViVEF/fsc
-HB8J4nuhFpf1+R9ezHkY9IrlRuiu2Q8YGKL+gAMEsNTnA6yTIZd5oy8eSD9p6sKc
-htqWeRxsFoCEdxjvn+3wj4YP1iV29O0wBFt4gQIDAQABAoIBAFfg5cFffp+Uu8yw
-09841chU2rEEpwT3AsQfDMBbQsG5Mvatx8gBgpq9N/B09pi+o0kR/KaS60VxnyqV
-rYN9fc/YJl+ATFzLEnlOkciDaa2azjx5ROkudETNZYXNDhi9GdjAziBkitXu4khy
-Ob8eszuAJVmm6XK1IXOmVYPGtdSJmUs5Bd6ahbQ/vaJzVOzHayjsSGOMbXicAfiu
-bh88AQJDqHH9LYE12fiEZhs8KogTs4MnKhc090NNVoF5G2dAeZ47itexSX6G0P62
-LL3xGLNViLPnpxE5Eir1MQnEgTgCLcKkUFOlg23/XroP6Ft0/M+2a3BZF+ZaSOz6
-EJ8qe8ECgYEA6vqobPVGzOQJtCtbzkpFm5sia+Z3ZPC21e/v8+7CjHms3ZQSruzq
-AMRk81d67gwgxbVJwvDISsMih0Njh4lHDhg/k4j3N+3FbkE78S3HpCE71n8SW1Qo
-PKw/Eh9tswLFCRClQOXaeqbKpts5t5EQzSAExfgzO7ItatViyiJjkskCgYEA3t8x
-TG6DJF56oE9nDhBAHTRJ0GoHjoBmRBHyK3CbyvWN2KhQOMCn8vmv35RMmVskO9IO
-n7OeH6mFu13stKIFrqhEBenl4wSM2wt6stnj9Vmstbuw5WQPgVBxJZuVdCREI8Gy
-54u99tpqBkC8XLZ6/0srFyk+8uFlat8kk4mSm/kCgYA02l6J632aVmyMVvhWZURU
-5McQSA1w6efmJQru7jRaToAAcu7k46sasxIV3gZrhtTUQ5usumYC0vNwQ0se0FTo
-KbIbKEKbFONEkm2+KNLv6v2/mGNzoXFPfFrPY7xT+HqDOHhDKbBDyEJq14Ka9Ik3
-6kzIjrRPaBtpHUgUOTn2aQKBgQDUsK0sYr62Y4+lE4Gmsy1scW0L/1Ps025FAddZ
-S2LyIrrWi3HbZ0ggIdaMiMs9AvSmPgWEtPZvAunD8JOnooPHtX8NIbUonDwMAn16
-12OrzoN6/36Gu6HsZ6dDG6JaLw30DbM9M2f7f171Tqwz0lW48rRRqyQOx7lwbzlJ
-r12BiQKBgEqnGNw/dX+tEpza3ke6Rg9EeC6YKXFIZNh6QPaUXXn5iT/JDjfdWP8E
-wZPXrnV/oB0NniaWEWX4Tn8pgKuDUfidkeM3Qsz0XQlGsRbWCohCVDN+c0ZzfS2d
-lIVxLRDOFE5ocQ+VmUy8FmtrpzR935YBla2Z0f5iPmwne/B9T4wl
-";
         private const  int    GITHUB_APP_ID                  = 114533;
         private const  int    GITHUB_APP_JWT_TOKEN_LIFE_TIME = 600;// 10 minutes is the maximum time allowed
         private static bool   DEBUG_LOGS                     = false;
         private static bool   BAD_DATA_COME                  = false;
+
+        private const string GITHUB_APP_PRIVATE_KEY = @"MIIEpAIBAAKCAQEAs8ZOZqm6T/T+VjKO2rY+rLC/qbHPVy5g3628nTTM+erWlmC8
+OV+2dyMCPUMb9oRlNTYKgYJUMGi+IPDkVaGwP6Hsz6fcZ9vIlH6eHrTBVzLYGy/B
+gSJe+1Am17cIIPpH0KaJjmNYFtb7oHtx4q2CkEbX4PwgJGIc2x32jLsTlELeUT7U
+ztQvrPANn5cJu57wouiSM0FR/SAELLkoqVHQA8jusgYuXIs5gjWWQVfz1kV2mdO8
+dGuU70X6+RIs0rrAMK608PY3AUbE97/4wykkcyPQKG/E2ZNYmq/8ZBumCfIHedzu
+sQ+epbgTY5FaHeVs5153EzP/Bh2JkPZR/kaWVwIDAQABAoIBAQCfqB9ax6PCfOcf
+8Fi0XqP8xCADefmVCIhaPjbDOvBLh8c52AFxxtIKrlm/xIjh/yTPBAaCjBduwqcQ
+JD/02NrpOEpTBVYWGrfhQS32QTtv0KTiSCBHKhpGgSFt9IxQlVYQNMb3YL0L07O3
+C8rRsJzCu1ff5Ko7BbNw2gRraX1y7gz1RhDfiPLdvnOCpnw+dCS5G5+DuoH9ytYo
+C0Bck+Nz5dNgXu+UJVwXhNTaSF2c61xheSbLWHmQazr42cfBjCev0E3nuc7qKTT6
+W1UmFU/6mJfLUc+GnFc8Tjv/s36CIa8CWJgtWzOjDn+JDFaN+7mgtCHkUcfHbs8v
+KQKEUf6BAoGBAO11nD6TScbZgJQqo/8NcfQO0nnv761/qIO0SMtOUdZg21hNiGmC
+ZozNV61t3GpUlzxdyyHfSIOAq4l8+v0rzhpigWPxc06f/nUPsHmWVZ2/RETREDeX
+dL5XzPKhrqG93+fCWcuZZAfrZPl7DqKgCdFKbUNeVslz0WIs9j5BZ61BAoGBAMHP
+rh5pxMQCroCbseSibigsneoiqkRhHrCJZJjgFwbqiGRuJhdsQ0KS3PdyJSGMlZYZ
+piPeGvC0Oxj1Mnm8u2gVMY/lIqr+/+1U3MNvuVDbmxg+kElm/w21JXqfZ1Qn98gA
+/B8ctGu5OpPY2BUndFgOYMGFpzNts0EHbkWH1SWXAoGAdZGFinXiUVHfF30FNYKy
+qOOt0jG5uW07QfpBEGf2nO3XrCC3KYYmwA/rGTMLrpmzR3Ao4txqSrGqPKhknHTT
+1rxu08z4CjWtBsh917VXLoNEic34+Y1Df/p4vqjOjcY01cqkKuoHXORvWhZTaLFU
+Kwtujaxny9ZMFQ+t26UGcAECgYBXUE3cK8BWofKlw/7Xxwmjlb4q3iUhGzPtSmiE
+qugU2JJL1Ifao46Fro5X+BecTq6Racq8e/JdIIVDUCvGRm2TjYC/l/YPXURFUqcG
+cQ3mzJjJyl3Mg9dCAKr63Fd7xWnOtArhpVfu9Arc0qM+nIDArvGOHb1e4PwRvtxB
+/NjczwKBgQCn1CntFaWJmkFXuogMp9Ww0a64PN7gdu93MXtk1T6xEfAVRnwqkNmw
+FUloqx8/ccfaNlqtkzqmGo2xKAk4u5CHq8E7eggoeLdyIqa6eF0EQVslnibkvYdw
+sGzmRq9ENrFnH4l2mhXOiCDxQceHmS5HqviCH1kly9fb2+H/R8uvQg==";
         #endregion
 
         [FunctionName("ValidateIssue")]
@@ -69,7 +70,9 @@ lIVxLRDOFE5ocQ+VmUy8FmtrpzR935YBla2Z0f5iPmwne/B9T4wl
             }
 
             #region GitHub App auth and new check created
-
+            //System.Resources.ResourceManager rm = new System.Resources.ResourceManager("Github", Assembly.GetExecutingAssembly());
+           // Console.WriteLine(rm);
+          //  Console.WriteLine(rm.GetString("s"));
             var generator = new GitHubJwt.GitHubJwtFactory(
             new GitHubJwt.StringPrivateKeySource( GITHUB_APP_PRIVATE_KEY ),
             new GitHubJwt.GitHubJwtFactoryOptions
@@ -106,8 +109,8 @@ lIVxLRDOFE5ocQ+VmUy8FmtrpzR935YBla2Z0f5iPmwne/B9T4wl
 
             #endregion
 
-            var valuesGraphQL = IsIssueAttached( responce.Token, requestedValues, log ).Result;
-
+            var valuesGraphQL = IsIssueAttached( responce, requestedValues, log ).Result;
+            Console.WriteLine("wmth");
             #region Create Update run for Check
             var checkUpdate = new CheckRunUpdate();
 
@@ -146,7 +149,7 @@ lIVxLRDOFE5ocQ+VmUy8FmtrpzR935YBla2Z0f5iPmwne/B9T4wl
             return new OkObjectResult( $"Task return {!BAD_DATA_COME}" );
         }
 
-        public static async Task<ValuesOfGraphQLResponce> IsIssueAttached(string token, RequestValues rv, ILogger log)
+        public static async Task<ValuesOfGraphQLResponce> IsIssueAttached(AccessToken responce, RequestValues rv, ILogger log)
         {
             var client = new GraphQLHttpClient(
                 "https://api.github.com/graphql",
@@ -155,7 +158,7 @@ lIVxLRDOFE5ocQ+VmUy8FmtrpzR935YBla2Z0f5iPmwne/B9T4wl
 
             client.HttpClient.DefaultRequestHeaders.Add(
                 "Authorization",
-                $"bearer { token }"
+                $"bearer { responce.Token }"
                 );
 
             var issueRequest = new GraphQLRequest
